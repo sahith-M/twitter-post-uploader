@@ -8,7 +8,7 @@ const fs = require('fs');
 require('dotenv').config();
 
 const app = express();
-const upload = multer({ dest: 'uploads/' }); // Temporary storage for file uploads
+const upload = multer({ dest: 'uploads/' }); // File upload directory
 
 // Middleware
 app.set('view engine', 'ejs');
@@ -45,9 +45,7 @@ passport.deserializeUser((obj, done) => done(null, obj));
 
 // Routes
 app.get('/', (req, res) => {
-  if (req.isAuthenticated()) {
-    return res.redirect('/dashboard'); // Redirect authenticated users to dashboard
-  }
+  if (req.isAuthenticated()) return res.redirect('/dashboard');
   res.render('index');
 });
 
@@ -57,10 +55,6 @@ app.get(
   '/auth/twitter/callback',
   passport.authenticate('twitter', { failureRedirect: '/failure' }),
   (req, res) => {
-    if (!req.user) {
-      console.error('Authentication failed. No user object received.');
-      return res.redirect('/failure');
-    }
     req.session.token = req.user.token;
     req.session.tokenSecret = req.user.tokenSecret;
     res.redirect('/dashboard');
@@ -84,22 +78,25 @@ app.post('/post', upload.single('image'), async (req, res) => {
     if (!req.file || !fs.existsSync(req.file.path)) {
       throw new Error('File not found or upload failed');
     }
+
+    // Upload media to Twitter
     const mediaId = await client.v1.uploadMedia(req.file.path);
+
+    // Post the tweet
     await client.v1.tweet(req.body.caption, { media_ids: mediaId });
     res.redirect('/success');
   } catch (error) {
     console.error('Error posting to Twitter:', error);
-    res.render('failure', { error: error.message });
+    res.redirect('/failure');
   }
 });
 
 app.get('/success', (req, res) => {
-  res.render('success', { message: 'Your tweet has been successfully posted!' });
+  res.render('success', { message: 'Your tweet was posted successfully!' });
 });
 
 app.get('/failure', (req, res) => {
-  const errorMessage = req.query.error || 'Something went wrong. Please try again.';
-  res.render('failure', { error: errorMessage });
+  res.render('failure', { error: 'An error occurred. Please try again.' });
 });
 
 // Start the server
