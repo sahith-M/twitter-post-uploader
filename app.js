@@ -1,25 +1,36 @@
 const express = require('express');
-const multer = require('multer');
-const { TwitterApi } = require('twitter-api-v2');
 const passport = require('passport');
 const TwitterStrategy = require('passport-twitter').Strategy;
+const multer = require('multer');
+const { TwitterApi } = require('twitter-api-v2');
+const session = require('express-session');
+const fs = require('fs');
 require('dotenv').config();
 
 const app = express();
+const upload = multer({ dest: 'uploads/' }); // Temporary storage for file uploads
 
-// Configure file uploads
-const upload = multer({ dest: 'uploads/' });
+// Middleware
+app.set('view engine', 'ejs');
+app.use(express.static('public'));
+app.use(express.urlencoded({ extended: true }));
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET,
+    resave: false,
+    saveUninitialized: true,
+  })
+);
+app.use(passport.initialize());
+app.use(passport.session());
 
-// Twitter API client
-let twitterClient;
-
-// Passport strategy
+// Twitter OAuth Configuration
 passport.use(
   new TwitterStrategy(
     {
-      consumerKey: process.env.TWITTER_API_KEY,
-      consumerSecret: process.env.TWITTER_API_SECRET,
-      callbackURL: 'http://localhost:3000/auth/twitter/callback',
+      consumerKey: process.env.TWITTER_CLIENT_ID,
+      consumerSecret: process.env.TWITTER_CLIENT_SECRET,
+      callbackURL: process.env.CALLBACK_URL,
     },
     (token, tokenSecret, profile, done) => {
       profile.token = token;
@@ -32,15 +43,11 @@ passport.use(
 passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((obj, done) => done(null, obj));
 
-// Middleware setup
-app.set('view engine', 'ejs'); // Use EJS for templates
-app.use(express.static('public')); // Serve static files (CSS, images, etc.)
-app.use(require('express-session')({ secret: process.env.SESSION_SECRET, resave: true, saveUninitialized: true }));
-app.use(passport.initialize());
-app.use(passport.session());
-
 // Routes
 app.get('/', (req, res) => {
+  if (req.isAuthenticated()) {
+    return res.redirect('/dashboard'); // Redirect authenticated users to dashboard
+  }
   res.render('index');
 });
 
@@ -50,13 +57,12 @@ app.get(
   '/auth/twitter/callback',
   passport.authenticate('twitter', { failureRedirect: '/failure' }),
   (req, res) => {
-    const { token, tokenSecret } = req.user;
-    twitterClient = new TwitterApi({
-      appKey: process.env.TWITTER_API_KEY,
-      appSecret: process.env.TWITTER_API_SECRET,
-      accessToken: token,
-      accessSecret: tokenSecret,
-    });
+    if (!req.user) {
+      console.error('Authentication failed. No user object received.');
+      return res.redirect('/failure');
+    }
+    req.session.token = req.user.token;
+    req.session.tokenSecret = req.user.tokenSecret;
     res.redirect('/dashboard');
   }
 );
@@ -67,21 +73,34 @@ app.get('/dashboard', (req, res) => {
 });
 
 app.post('/post', upload.single('image'), async (req, res) => {
-  if (!req.isAuthenticated()) return res.redirect('/');
-  const { caption } = req.body;
+  const client = new TwitterApi({
+    appKey: process.env.TWITTER_CLIENT_ID,
+    appSecret: process.env.TWITTER_CLIENT_SECRET,
+    accessToken: req.session.token,
+    accessSecret: req.session.tokenSecret,
+  });
 
   try {
-    const mediaId = await twitterClient.v1.uploadMedia(req.file.path);
-    await twitterClient.v1.tweet(caption, { media_ids: mediaId });
+    if (!req.file || !fs.existsSync(req.file.path)) {
+      throw new Error('File not found or upload failed');
+    }
+    const mediaId = await client.v1.uploadMedia(req.file.path);
+    await client.v1.tweet(req.body.caption, { media_ids: mediaId });
     res.redirect('/success');
-  } catch (err) {
-    console.error(err);
-    res.redirect('/failure');
+  } catch (error) {
+    console.error('Error posting to Twitter:', error);
+    res.render('failure', { error: error.message });
   }
 });
 
-app.get('/success', (req, res) => res.render('success'));
-app.get('/failure', (req, res) => res.render('failure'));
+app.get('/success', (req, res) => {
+  res.render('success', { message: 'Your tweet has been successfully posted!' });
+});
+
+app.get('/failure', (req, res) => {
+  const errorMessage = req.query.error || 'Something went wrong. Please try again.';
+  res.render('failure', { error: errorMessage });
+});
 
 // Start the server
 const PORT = process.env.PORT || 3000;

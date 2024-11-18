@@ -1,14 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>Dashboard</title>
+  <title>Dashboard</title>
 </head>
 <body>
-    <h1>Welcome, <%= user.username %></h1>
-    <form action="/post" method="POST" enctype="multipart/form-data">
-        <input type="text" name="caption" placeholder="Write your caption" required />
-        <input type="file" name="image" accept="image/*" required />
-        <button type="submit">Post to Twitter</button>
-    </form>
+  <h1>Welcome, <%= user.username %></h1>
+  <form action="/post" method="POST" enctype="multipart/form-data">
+    <label for="caption">Tweet Caption:</label>
+    <input type="text" name="caption" id="caption" required>
+    <label for="image">Upload Image:</label>
+    <input type="file" name="image" id="image" required>
+    <button type="submit">Post to Twitter</button>
+  </form>
 </body>
 </html>
